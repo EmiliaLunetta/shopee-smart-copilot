@@ -1,0 +1,6 @@
+streamlit
+pandas
+pillow
+google-genai
+apify-client
+python-dotenv
