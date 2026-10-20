@@ -20,7 +20,7 @@ except ImportError:
 
 # ───────────────────────── 1. Cấu hình Trang & Giao diện ─────────────────────────
 st.set_page_config(
-    page_title="Shopee Copilot AI - GMAP 2027",
+    page_title="Shopee Copilot",
     page_icon="🛍️",
     layout="wide"
 )
@@ -34,7 +34,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">🛍️ Shopee Smart Lens & Multi-Seller Copilot</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🛍️ Shopee Copilot</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Nhận diện sản phẩm qua Ảnh/Link/Tên ➔ Quét đối soát đa seller Shopee ➔ Bóc tách đánh giá thực tế bằng AI.</div>', unsafe_allow_html=True)
 
 
@@ -277,29 +277,48 @@ def _fetch_reviews_cached(token, actor_id, product_url, max_reviews):
         run_input["proxyConfiguration"] = {"useApifyProxy": True, "apifyProxyGroups": [REVIEWS_PROXY_GROUP]}
     run = _run_actor(cli, actor_id, run_input, wait_secs=90)
     rows = _load_dataset(cli, run, actor_id)
-    reviews = []
+    reviews, summary = [], None
     for r in rows:
         if r.get("recordType") == "summary":
+            summary = summary or r
             continue
         cmt = str(r.get("comment") or "").strip()
         if cmt:
             reviews.append({"star": int(to_num(r.get("ratingStar"), 0)), "comment": cmt[:250]})
-    if not reviews:
-        if any(r.get("recordType") == "summary" for r in rows):
-            raise RuntimeError("Actor chỉ trả bản tóm tắt, không có bình luận: nhiều khả năng Shopee đã chặn luồng review (IP datacenter). Thử đặt APIFY_REVIEWS_PROXY_GROUP=RESIDENTIAL.")
-        raise RuntimeError("Actor chạy xong nhưng không có bình luận nào.")
-    return reviews
+    if not reviews and not summary:
+        raise RuntimeError("Actor chạy xong nhưng không trả dòng nào (không có bình luận, không có tóm tắt).")
+    return {"reviews": reviews, "summary": summary}
+
+def parse_summary(s):
+    """Chuẩn hóa dòng tóm tắt của actor review (các trường có thể thiếu)."""
+    if not s:
+        return None
+    stars = s.get("starBreakdown")
+    stars = [int(to_num(x)) for x in stars] if isinstance(stars, list) and len(stars) == 5 else None
+    out = {
+        "total": int(to_num(s.get("total"), 0)) or None,
+        "sold": int(to_num(s.get("historicalSold"), 0)) or None,
+        "rating": round(to_num(s.get("ratingStar"), 0), 2) or None,
+        "with_comment": int(to_num(s.get("withComment"), 0)) or None,
+        "stars": stars,
+    }
+    return out if any(v for v in out.values()) else None
 
 def fetch_apify_reviews(token, actor_id, product_url, max_reviews=20):
-    """Giai đoạn 2: cào bình luận. Trả về (reviews, lỗi hoặc None)."""
+    """Giai đoạn 2: cào bình luận. Trả về (reviews, summary, lỗi hoặc None)."""
     if not token:
-        return [], "Chưa có Apify token."
+        return [], None, "Chưa có Apify token."
     if not product_url or "-i." not in product_url:
-        return [], "Không dựng được URL sản phẩm dạng -i.<shopId>.<itemId>."
+        return [], None, "Không dựng được URL sản phẩm dạng -i.<shopId>.<itemId>."
     try:
-        return _fetch_reviews_cached(token, actor_id, product_url, max_reviews), None
+        data = _fetch_reviews_cached(token, actor_id, product_url, max_reviews)
     except Exception as e:
-        return [], f"{type(e).__name__}: {e}"
+        return [], None, f"{type(e).__name__}: {e}"
+    summary = parse_summary(data["summary"])
+    err = None
+    if not data["reviews"]:
+        err = "Actor chỉ trả bản tóm tắt, không có bình luận (nhiều khả năng Shopee chặn luồng review từ IP datacenter; cần residential proxy)."
+    return data["reviews"], summary, err
 
 def fetch_mock(keyword, brand):
     """Dữ liệu mô phỏng dự phòng (CHỈ để demo giao diện)."""
@@ -412,7 +431,7 @@ Phân tích ảnh và/hoặc mô tả của người dùng, trả về DUY NHẤ
     )
     return json.loads(re.sub(r"```json|```", "", res.text).strip())
 
-def generate_verdict_with_reviews(client, product_info, top_shop, ranked_list, reviews, is_mock, reviews_note):
+def generate_verdict_with_reviews(client, product_info, top_shop, ranked_list, reviews, is_mock, reviews_note, summary=None):
     """Phân tích deal và bóc tách đánh giá người mua bằng Gemini."""
     if reviews:
         reviews_formatted = "\n".join(f"- [{r['star'] or '?'}⭐]: {r['comment']}" for r in reviews)
@@ -428,11 +447,21 @@ def generate_verdict_with_reviews(client, product_info, top_shop, ranked_list, r
         for p in ranked_list[:8]
     )
 
+    if summary:
+        sb = summary.get("stars")
+        summary_text = (
+            f"- Tổng số đánh giá: {summary.get('total') or 'không rõ'} | Số có bình luận: {summary.get('with_comment') or 'không rõ'}\n"
+            f"- Điểm sao trung bình: {summary.get('rating') or 'không rõ'} | Đã bán (lũy kế): {summary.get('sold') or 'không rõ'}\n"
+            f"- Phân bố 1★→5★: {sb if sb else 'không rõ'}"
+        )
+    else:
+        summary_text = "(không có)"
+
     prompt = f"""Bạn là Trợ lý Mua sắm Cấp cao của Shopee Việt Nam. Hãy đưa ra nhận định sắc sảo, khách quan, định dạng Markdown.
 Sản phẩm: {product_info.get('name')}
 {'[LƯU Ý: ĐANG SỬ DỤNG DỮ LIỆU MÔ PHỎNG]' if is_mock else '[DỮ LIỆU THẬT THU THẬP TỪ SHOPEE]'}
 
-GIỚI HẠN DỮ LIỆU (phải tôn trọng): không có số lượt bán, không có thông tin voucher, không có huy hiệu Mall/Yêu thích chính thức.
+GIỚI HẠN DỮ LIỆU (phải tôn trọng): bảng giá các shop không có số lượt bán, không có voucher, không có huy hiệu Mall/Yêu thích chính thức. Riêng shop được đề xuất có thể có thống kê đánh giá ở mục dưới.
 Chỉ dùng đúng các con số bên dưới, không suy diễn thêm.
 
 SHOP ĐƯỢC ĐỀ XUẤT:
@@ -444,6 +473,9 @@ SHOP ĐƯỢC ĐỀ XUẤT:
 
 MẶT BẰNG GIÁ ({len(prices)} shop): thấp nhất {vnd(prices[0])}, trung vị {vnd(prices[len(prices)//2])}, cao nhất {vnd(prices[-1])}
 {market}
+
+THỐNG KÊ ĐÁNH GIÁ CỦA SẢN PHẨM ĐỀ XUẤT (từ bản tóm tắt của Shopee):
+{summary_text}
 
 BÌNH LUẬN NGƯỜI MUA ({reviews_note or 'thu thập thành công'}):
 {reviews_formatted}
@@ -658,12 +690,12 @@ if st.button("🚀 Quét Toàn Diện Shopee & Bóc Tách Review", use_container
     st.success(f"🏆 **Shop đề xuất:** {top_deal['shop']} ({top_deal['shop_type']}) | Giá bán: **{vnd(top_deal['final'])}** | Ưu đãi: **{top_deal['promo_tag']}**")
 
     # BƯỚC 3: Cào Review thực tế (Giai đoạn 2)
-    reviews, reviews_note = [], None
+    reviews, reviews_note, review_summary = [], None, None
     if is_mock:
         reviews, reviews_note = MOCK_REVIEWS, "bình luận MÔ PHỎNG"
     else:
         with st.spinner(f"🕵️ Đang cào bình luận người mua của shop: {top_deal['shop']}..."):
-            reviews, err = fetch_apify_reviews(APIFY_TOKEN, ACTOR_REVIEWS, top_deal["review_url"], max_reviews=20)
+            reviews, review_summary, err = fetch_apify_reviews(APIFY_TOKEN, ACTOR_REVIEWS, top_deal["review_url"], max_reviews=20)
         if err:
             reviews_note = "không thu thập được"
             st.warning(
@@ -671,11 +703,26 @@ if st.button("🚀 Quét Toàn Diện Shopee & Bóc Tách Review", use_container
                 "Báo cáo bên dưới sẽ KHÔNG có phần phân tích bình luận."
             )
 
+    # Thống kê đánh giá từ dòng tóm tắt (có thể có dù không lấy được bình luận)
+    if review_summary:
+        st.subheader("📈 Thống kê đánh giá của sản phẩm đề xuất")
+        m1, m2, m3, m4 = st.columns(4)
+        fmt = lambda v: f"{v:,}".replace(",", ".") if v else "—"
+        m1.metric("Tổng đánh giá", fmt(review_summary["total"]))
+        m2.metric("Đã bán (lũy kế)", fmt(review_summary["sold"]))
+        m3.metric("Điểm sao TB", review_summary["rating"] or "—")
+        m4.metric("Có bình luận", fmt(review_summary["with_comment"]))
+        if review_summary["stars"]:
+            st.bar_chart(pd.DataFrame({"Số lượt": review_summary["stars"]},
+                                      index=["1 ⭐", "2 ⭐", "3 ⭐", "4 ⭐", "5 ⭐"]))
+    elif not is_mock:
+        st.caption("Không có bản tóm tắt đánh giá cho sản phẩm này.")
+
     # BƯỚC 4: Gemini tổng hợp báo cáo chuyên sâu
     with st.spinner("🤖 AI đang phân tích ưu/nhược điểm và đánh giá rủi ro..."):
         try:
             analysis_markdown = generate_verdict_with_reviews(
-                gemini_client, prod_info, top_deal, ranked_items, reviews, is_mock, reviews_note
+                gemini_client, prod_info, top_deal, ranked_items, reviews, is_mock, reviews_note, review_summary
             )
             st.markdown(analysis_markdown)
         except Exception as e:
