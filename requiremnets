@@ -1,4 +1,6 @@
 streamlit
-google-genai
-pillow
+pandas
+Pillow
 python-dotenv
+google-genai
+apify-client
