@@ -46,14 +46,20 @@ Instead of attempting to out-entertain TikTok with unsustainable content marketi
 
 ---
 
-## 4. 📊 Strategic Business Impact for Shopee (The GMAP Lens)
+## 4. Enterprise Roadmap & Strategic Value (Sea / Shopee)
 
-| Core Metric | Problem Before Shopee Lens AI | Impact Delivered by Shopee Lens AI |
-| :--- | :--- | :--- |
-| **Conversion Rate (CVR)** | Users abandon carts after 15+ mins of manual comparison | **Slashes Time-to-Purchase to < 10 seconds**, directly capturing the 52% showrooming traffic |
-| **Return & Refund Rate (RRR)** | Impulse buyers receive subpar items from untrusted sellers | **Proactive risk flags & honest sentiment summaries** prevent purchases from deceptive merchants |
-| **Unit Economics & Margins** | Heavy voucher spend without clear differentiation | **Guides users toward high-margin, SPX-fulfilled Mall/Preferred sellers**, optimizing net contribution margin |
-| **User Retention & Trust** | Review fatigue erodes buyer confidence | Establishes Shopee as the **most transparent, intelligent e-commerce ecosystem** in ASEAN |
+This Proof of Concept is architected to transition into Shopee's internal infrastructure:
+
+### 1. Architecture Migration (Scraper to Internal RPC)
+- Replace third-party scrapers with direct gRPC connections to Shopee's internal `SearchService` and `ReviewService`.
+- Reduce data retrieval latency from ~15 seconds to under 200 milliseconds.
+
+### 2. Personalized Margin & Voucher Stacking
+- Integrate with ShopeePay and SPayLater engines to compute real-time, user-specific net prices, taking into account user voucher wallets and shipping subsidies.
+
+### 3. Core Business Metrics Impact
+- **Conversion Rate (CVR):** Reduces decision paralysis by curating trustworthy listings for complex, high-consideration purchases.
+- **Return & Refund Rate (RRR):** Mitigates buyer remorse and product mismatches through transparent review sentiment analysis.
 
 ---
 
@@ -61,10 +67,43 @@ Instead of attempting to out-entertain TikTok with unsustainable content marketi
 * **Frontend Interface:** Streamlit (Responsive web interface optimized for rapid prototyping)
 * **Vision & NLP Backbone:** Google Gemini API (Multimodal entity recognition & zero-shot sentiment parsing)
 * **Data Ingestion:** Apify Shopee Scraper actor integration paired with local fallback heuristics
-* **Promotion Rule Engine:** Custom-built Python logic simulating real-time Shopee voucher stacking and discount caps# 🛍️ Shopee Lens AI: Multimodal Smart Shopping Assistant
+* **Promotion Rule Engine:** Custom-built Python logic simulating real-time Shopee voucher stacking and discount caps
 
-## 🛠️ Tech Stack
-- **Frontend / Deployment:** Streamlit Community Cloud, Python
-- **AI Engine:** Google Gemini API (Multimodal Vision & NLP)
-- **Data Architecture:** REST APIs, Python-dotenv, Pillow
+## 6. Installation & Local Setup
 
+### Prerequisites
+- Python 3.10 or higher
+- Git
+
+### Step 1: Clone the Repository
+```bash
+git clone https://github.com/EmiliaLunetta/shopee-smart-copilot.git
+cd shopee-smart-copilot
+```
+
+## Step 2:  Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+## Step 3: Configure Environment Variables
+Copy the sample environment file to create .env:
+```bash
+cp .env.example .env
+```
+Populate .env with your API credentials:
+```bash
+# Required for vision extraction and sentiment analysis
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Required for live Shopee scraping (Optional: fallback to mock data if omitted)
+APIFY_TOKEN=your_apify_token_here
+```
+
+## Step 4: Run the Application
+
+```bash
+streamlit run app.py
+```
+Open your browser at http://localhost:8501.
+## 
