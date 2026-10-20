@@ -51,10 +51,15 @@ def get_env(key, default=None):
 GEMINI_KEY = get_env("GEMINI_API_KEY")
 GEMINI_MODEL = get_env("GEMINI_MODEL", "gemini-3.8-flash")
 APIFY_TOKEN = get_env("APIFY_TOKEN")
+# Đặt GEMINI_USE_VERTEX=1 nếu khóa Gemini dạng "AQ." bị lỗi 401 ACCESS_TOKEN_TYPE_UNSUPPORTED với Gemini API thường
+GEMINI_USE_VERTEX = str(get_env("GEMINI_USE_VERTEX", "")).strip().lower() in ("1", "true", "yes")
 # Actor tìm kiếm: https://console.apify.com/actors/XjUm7zx5pJe3kYukv  (lergassy/shopee-scraper)
 ACTOR_SEARCH = get_env("APIFY_ACTOR_SEARCH", "lergassy/shopee-scraper")
-# Actor review: https://console.apify.com/actors/vX1uhoJOlFc6UYe9N  (zen-studio/shopee-product-reviews-scraper)
-ACTOR_REVIEWS = get_env("APIFY_ACTOR_REVIEWS", "zen-studio/shopee-product-reviews-scraper")
+# Actor review: https://console.apify.com/actors/ordFA3h76hclTx5tv  (wyle/shopee-product-reviews-scraper)
+# (actor cũ zen-studio/shopee-product-reviews-scraper hay bị FAILED; vẫn dùng được nếu đặt biến APIFY_ACTOR_REVIEWS)
+ACTOR_REVIEWS = get_env("APIFY_ACTOR_REVIEWS", "wyle/shopee-product-reviews-scraper")
+# Shopee chặn IP datacenter ở luồng review. Nếu gói Apify của bạn có residential proxy, đặt APIFY_REVIEWS_PROXY_GROUP=RESIDENTIAL
+REVIEWS_PROXY_GROUP = get_env("APIFY_REVIEWS_PROXY_GROUP")
 
 
 # ───────────────────────── 3. Utility & Xử lý Dữ liệu ─────────────────────────
@@ -191,12 +196,30 @@ def _run_status(run):
     s = getattr(s, "value", s)
     return str(s or "").upper().replace("RUNSTATUS.", "")
 
-def _load_dataset(cli, run, actor_id):
-    """Kiểm tra run thành công rồi đọc toàn bộ dataset."""
+def _wait_until_done(cli, run, max_secs):
+    """Nếu run còn RUNNING sau lần chờ đầu, chờ tiếp (tối đa max_secs) thay vì coi là lỗi."""
+    import time
+    deadline = time.time() + max_secs
+    while run is not None and _run_status(run) in ("RUNNING", "READY") and time.time() < deadline:
+        run_id = _run_field(run, "id")
+        try:
+            new = cli.run(run_id).wait_for_finish(wait_duration=timedelta(seconds=30))
+        except TypeError:
+            new = cli.run(run_id).wait_for_finish(wait_secs=30)
+        if new is not None:
+            run = new
+        time.sleep(1)
+    return run
+
+def _load_dataset(cli, run, actor_id, wait_more=240):
+    """Chờ run xong, kiểm tra thành công rồi đọc toàn bộ dataset."""
     if run is None:
-        raise TimeoutError(f"{actor_id}: chưa chạy xong trong thời gian chờ.")
+        raise TimeoutError(f"{actor_id}: không nhận được thông tin run.")
+    run = _wait_until_done(cli, run, wait_more)
     status = _run_status(run)
     run_id = _run_field(run, "id")
+    if status in ("RUNNING", "READY"):
+        raise TimeoutError(f"{actor_id}: run {run_id} vẫn đang chạy sau {wait_more}s. Mở Apify Console để xem kết quả, hoặc thử lại sau ít phút.")
     if status != "SUCCEEDED":
         raise RuntimeError(f"{actor_id}: run {run_id} kết thúc với trạng thái {status or 'không rõ'} (xem Log trong Apify Console).")
     ds_id = _run_field(run, "default_dataset_id")
@@ -248,15 +271,22 @@ def _fetch_reviews_cached(token, actor_id, product_url, max_reviews):
         "maxReviewsPerProduct": max_reviews,
         "starFilter": "all",
         "contentFilter": "with comments",
+        "includeSummary": True,  # giữ lại để biết khi nào Shopee chặn (chỉ có summary, không có review)
     }
+    if REVIEWS_PROXY_GROUP:
+        run_input["proxyConfiguration"] = {"useApifyProxy": True, "apifyProxyGroups": [REVIEWS_PROXY_GROUP]}
     run = _run_actor(cli, actor_id, run_input, wait_secs=90)
     rows = _load_dataset(cli, run, actor_id)
     reviews = []
     for r in rows:
+        if r.get("recordType") == "summary":
+            continue
         cmt = str(r.get("comment") or "").strip()
         if cmt:
             reviews.append({"star": int(to_num(r.get("ratingStar"), 0)), "comment": cmt[:250]})
     if not reviews:
+        if any(r.get("recordType") == "summary" for r in rows):
+            raise RuntimeError("Actor chỉ trả bản tóm tắt, không có bình luận: nhiều khả năng Shopee đã chặn luồng review (IP datacenter). Thử đặt APIFY_REVIEWS_PROXY_GROUP=RESIDENTIAL.")
         raise RuntimeError("Actor chạy xong nhưng không có bình luận nào.")
     return reviews
 
@@ -304,6 +334,29 @@ MOCK_REVIEWS = [
     {"star": 4, "comment": "[MÔ PHỎNG] Chất lượng ổn trong tầm giá."},
     {"star": 2, "comment": "[MÔ PHỎNG] Hộp hơi móp do vận chuyển, shop trả lời chậm."},
 ]
+
+def filter_relevant(items, keyword, brand):
+    """Loại kết quả lạc đề (vd tìm Marshall nhưng ra JBL): hãng phải có trong tên
+    và ít nhất 50% từ khóa đặc trưng xuất hiện trong tên sản phẩm."""
+    generic = {"tai", "nghe", "loa", "điện", "thoại", "cho", "và", "the", "pro"}
+    def norm(s):
+        return re.sub(r"[^\w\s]", " ", str(s).lower())
+    brand_n = norm(brand).strip() if brand and brand.lower() not in ("đa dạng", "chính hãng") else ""
+    brand_toks = set(brand_n.split())
+    toks = [t for t in norm(keyword).split() if len(t) >= 2 and t not in generic and t not in brand_toks]
+    accessory = ("ốp", "case", "vỏ bảo vệ", "miếng dán", "dây sạc", "đệm tai", "túi đựng", "bao đựng", "phụ kiện", "mút tai")
+    kw_low = norm(keyword)
+    kept = []
+    for p in items:
+        title = norm(p["title"])
+        if brand_n and brand_n not in title:
+            continue
+        if any(a in title and a not in kw_low for a in accessory):
+            continue
+        if toks and sum(t in title.split() for t in toks) / len(toks) < 0.5:
+            continue
+        kept.append(p)
+    return kept, len(items) - len(kept)
 
 def prepare_and_flag(items):
     """Gắn cờ giá bất thường: thấp hơn 35% trung vị và ít đánh giá."""
@@ -416,12 +469,51 @@ NHIỆM VỤ:
     return res.text
 
 
+class GeminiClient:
+    """Dùng khóa Gemini bất kể định dạng (AIza... hay AQ....). Nếu bị 401 thì tự thử chế độ còn lại
+    (Gemini API <-> Vertex express) và nhớ chế độ chạy được."""
+    def __init__(self, key):
+        self.key = key
+        self.modes = [True, False] if GEMINI_USE_VERTEX else [False, True]
+        self._clients = {}
+        self.models = self  # để gọi được client.models.generate_content(...)
+
+    def _client(self, vertex):
+        if vertex not in self._clients:
+            self._clients[vertex] = (genai.Client(vertexai=True, api_key=self.key) if vertex
+                                     else genai.Client(api_key=self.key))
+        return self._clients[vertex]
+
+    def generate_content(self, **kwargs):
+        first_error = None
+        for vertex in list(self.modes):
+            try:
+                res = self._client(vertex).models.generate_content(**kwargs)
+                self.modes = [vertex] + [m for m in self.modes if m != vertex]
+                return res
+            except Exception as e:
+                first_error = first_error or e
+                s = str(e)
+                if not ("401" in s or "UNAUTHENTICATED" in s or "ACCESS_TOKEN" in s):
+                    raise
+        raise first_error
+
+
 # ───────────────────────── 6. Sidebar Điều khiển ─────────────────────────
 with st.sidebar:
     st.header("⚙️ Cấu hình Hệ thống")
-    if not GEMINI_KEY:
+    def _mask(k):
+        k = (k or "").strip().strip("\"'")
+        return f"{k[:4]}…{k[-4:]}" if len(k) > 8 else "(quá ngắn)"
+
+    # Có khóa trong .env/secrets thì tự dùng, không hiện ô nhập; thiếu mới hiện ô
+    if GEMINI_KEY:
+        st.caption(f"✅ Gemini key từ cấu hình: `{_mask(GEMINI_KEY)}`")
+    else:
         GEMINI_KEY = st.text_input("Gemini API Key:", type="password")
-    if not APIFY_TOKEN:
+    if APIFY_TOKEN:
+        st.caption(f"✅ Apify token từ cấu hình: `{_mask(APIFY_TOKEN)}`")
+    else:
         APIFY_TOKEN = st.text_input("Apify API Token (Scraper):", type="password")
 
     st.divider()
@@ -473,7 +565,8 @@ if st.button("🚀 Quét Toàn Diện Shopee & Bóc Tách Review", use_container
         st.error("Vui lòng nhập Gemini API Key ở thanh bên trái!")
         st.stop()
 
-    gemini_client = genai.Client(api_key=GEMINI_KEY)
+    GEMINI_KEY = GEMINI_KEY.strip().strip("\"'")
+    gemini_client = GeminiClient(GEMINI_KEY)  # nhận mọi định dạng khóa, tự thử lại nếu 401
 
     # BƯỚC 1: Xử lý link & Nhận diện sản phẩm
     cleaned_text = extract_product_name_from_url(text_query)
@@ -520,6 +613,16 @@ if st.button("🚀 Quét Toàn Diện Shopee & Bóc Tách Review", use_container
             st.write("Dòng thô đầu tiên:")
             st.json(meta["sample"])
 
+    # Lọc kết quả lạc đề (chỉ với dữ liệu thật)
+    if not is_mock:
+        kept, dropped = filter_relevant(items, keyword, prod_info.get("brand"))
+        if len(kept) >= 3:
+            items = kept
+            if dropped:
+                st.caption(f"Đã loại {dropped} kết quả không khớp tên sản phẩm/hãng, còn {len(kept)} shop.")
+        else:
+            st.warning(f"Chỉ {len(kept)} kết quả khớp đúng sản phẩm nên giữ nguyên toàn bộ {len(items)} kết quả. Hãy kiểm tra lại cột Shop/tên trước khi mua.")
+
     # Xếp hạng & hiển thị bảng
     ranked_items = rank_items(prepare_and_flag(items), sort_choice)
     top_deal = ranked_items[0]
@@ -564,8 +667,7 @@ if st.button("🚀 Quét Toàn Diện Shopee & Bóc Tách Review", use_container
         if err:
             reviews_note = "không thu thập được"
             st.warning(
-                f"Không lấy được bình luận ({err[:250]}). Lưu ý: actor review đang bị giới hạn, "
-                "gói Apify Free chỉ có 20 lượt chạy trọn đời (mỗi lượt tối đa 20 review của 1 sản phẩm). "
+                f"Không lấy được bình luận ({err[:300]}). "
                 "Báo cáo bên dưới sẽ KHÔNG có phần phân tích bình luận."
             )
 
