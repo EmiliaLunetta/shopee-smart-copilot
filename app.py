@@ -1,33 +1,58 @@
 import os
 import re
+import urllib.parse
 import streamlit as st
 from PIL import Image
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-# ───────────────────────── 1. Môi trường & cấu hình ─────────────────────────
+# ───────────────────────── 1. Cấu hình trang ─────────────────────────
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
 
-st.set_page_config(page_title="Shopee Lens AI Copilot", page_icon="🛍️", layout="wide")
+st.set_page_config(
+    page_title="Shopee Smart Lens AI - GMAP 2027 PoC",
+    page_icon="🛍️",
+    layout="wide"
+)
 
 st.markdown("""
     <style>
-    .main-title { font-size: 32px; font-weight: bold; color: #EE4D2D; margin-bottom: 5px; }
-    .sub-title { font-size: 16px; color: #555; margin-bottom: 25px; }
-    .stButton>button { background-color: #EE4D2D; color: white; border-radius: 8px; font-weight: bold; }
+    .main-title { font-size: 30px; font-weight: 800; color: #EE4D2D; margin-bottom: 0px; }
+    .sub-title { font-size: 15px; color: #666; margin-bottom: 20px; }
+    .shopee-badge { background-color: #EE4D2D; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+    .stButton>button { background-color: #EE4D2D; color: white; border-radius: 8px; font-weight: bold; border: none; }
+    .stButton>button:hover { background-color: #d73211; color: white; }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">🛍️ Shopee Lens AI: Trợ lý Mua sắm Đa phương thức</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Tải ảnh hoặc dán link sản phẩm để AI nhận diện, tra cứu thông tin thật trên web (Google Search) và gợi ý nơi mua tối ưu.</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🛍️ Shopee Copilot: Multi-Seller & Review Analyzer</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">AI Engine hỗ trợ nhận diện sản phẩm, quét các seller trên Shopee, đối soát Flash Sale, Freeship Xtra & bóc tách bình luận người mua.</div>', unsafe_allow_html=True)
 
 
-# ───────────────────────── 2. Hàm hỗ trợ ─────────────────────────
+# ───────────────────────── 2. Utility & Helpers ─────────────────────────
+def extract_product_name_from_url(url: str) -> str:
+    """Bóc tách tên sản phẩm từ URL Shopee nếu người dùng chỉ dán link."""
+    url = url.strip()
+    if "shopee.vn" not in url:
+        return url
+    try:
+        parsed = urllib.parse.urlparse(url)
+        path = parsed.path.strip("/")
+        # URL Shopee dạng: /Ten-San-Pham-i.123456.7891011
+        if "-i." in path:
+            slug = path.split("-i.")[0]
+            clean_name = slug.replace("-", " ")
+            return urllib.parse.unquote(clean_name)
+    except Exception:
+        pass
+    return url
+
+
 @st.cache_data(show_spinner=False, ttl=3600)
 def get_available_models(key: str) -> list[str]:
-    """Hỏi Google xem key này gọi được model nào, rồi xếp flash mới nhất lên đầu."""
+    """Lấy danh sách các model Flash khả dụng từ Google."""
     client = genai.Client(api_key=key)
     names = []
     for m in client.models.list():
@@ -35,211 +60,186 @@ def get_available_models(key: str) -> list[str]:
         if "generateContent" in actions:
             names.append(m.name.replace("models/", ""))
 
-    # Chỉ lấy bản flash dùng được cho text + ảnh
     skip = ["image", "tts", "live", "audio", "embedding", "robotics", "computer"]
     flash = [n for n in names if "flash" in n and not any(s in n for s in skip)]
 
     def sort_key(n: str):
         v = re.search(r"gemini-(\d+(?:\.\d+)?)", n)
         version = float(v.group(1)) if v else 0.0
-        return (version, "lite" not in n)  # bản lite xếp sau
+        return (version, "lite" not in n)
 
     return sorted(flash, key=sort_key, reverse=True)
 
 
+# ───────────────────────── 3. System Instructions & Prompt Engine ─────────────────────────
 SYSTEM_INSTRUCTION = """
-Bạn là Trợ lý Mua sắm Cá nhân (AI Shopping Copilot) của Shopee. Trả lời bằng tiếng Việt, định dạng Markdown.
+Bạn là Trợ lý Mua sắm Thông minh Độc quyền của Shopee Việt Nam (Shopee Copilot AI).
+Nhiệm vụ của bạn là phục vụ người mua hàng bằng cách phân tích ĐA ĐỐI TÁC BÁN HÀNG (Multi-Seller) trên Shopee.
 
-QUY TẮC TRUNG THỰC (RẤT QUAN TRỌNG):
-- Chỉ đưa ra giá, số sao, lượt bán, nội dung review nếu bạn TÌM THẤY trong kết quả Google Search.
-- Nếu không tìm thấy một thông tin nào đó, ghi rõ "Không tìm thấy dữ liệu". TUYỆT ĐỐI không đoán hoặc bịa số liệu.
-- Với mỗi mức giá/đánh giá, ghi rõ nguồn (tên trang web) và nói đây là mức giá tham khảo, có thể đã thay đổi.
-- Không khẳng định "shop X bán giá Y" nếu không có nguồn xác nhận.
+QUY TẮC CỐT LÕI:
+1. TRUNG THỰC TUYỆT ĐỐI: Dữ liệu về giá, Flash Sale, voucher, lượt bán, đánh giá review PHẢI dựa trên kết quả tìm kiếm thực tế trên Shopee (qua Google Search grounding). Nếu không tìm thấy, ghi rõ "Chưa có dữ liệu xác minh", KHÔNG tự bịa đặt.
+2. CHUYÊN BIỆT SHOPEE: Tập trung tìm kiếm các seller trên shopee.vn. Nhận diện các nhãn đặc trưng: Shopee Mall, Shop Yêu Thích (SYT), Shop Yêu Thích+ (SYT+), Shop thường.
+3. PHÂN TÍCH ƯU ĐÃI: Cố gắng phát hiện các nhãn "Freeship Xtra", "Flash Sale" hoặc "Voucher Giảm Giá" nếu thông tin hiển thị.
+4. BÓC TÁCH BÌNH LUẬN: Đọc và lọc các phản hồi thực tế của khách hàng (khen điểm gì, chê lỗi kỹ thuật/đóng gói/giao hàng thế nào).
 """.strip()
 
 
-def build_prompt(sort_criteria: str) -> str:
+def build_copilot_prompt(product_hint: str, sort_criteria: str) -> str:
     return f"""
-TIÊU CHÍ ƯU TIÊN XẾP HẠNG CỦA NGƯỜI DÙNG: "{sort_criteria}"
+MỤC TIÊU PHÂN TÍCH MUA SẮM TẠI SHOPEE VIỆT NAM
+Sản phẩm đầu vào: "{product_hint}"
+Tiêu chí ưu tiên của người mua: "{sort_criteria}"
 
-NHIỆM VỤ:
-1. NHẬN DIỆN SẢN PHẨM: tên, thương hiệu, model, phân khúc ngành hàng (dựa vào ảnh và/hoặc link/tên người dùng cung cấp).
-2. TRA CỨU THỊ TRƯỜNG bằng Google Search (ưu tiên Shopee Việt Nam, sau đó là Lazada, Tiki, TikTok Shop, trang hãng):
-   - Lập BẢNG SO SÁNH 2-4 nơi bán/nguồn: Nơi bán | Loại (Mall/chính hãng/shop thường) | Giá tham khảo | Đánh giá | Nguồn.
-   - Sắp xếp bảng đúng theo tiêu chí: "{sort_criteria}".
-3. TỔNG HỢP REVIEW THỰC TẾ từ các nguồn tìm được:
-   - 👍 Điểm khen nhiều nhất.
-   - 👎 Điểm chê / rủi ro cần né.
-4. KẾT LUẬN MUA HÀNG (Smart Verdict): nên mua ở đâu theo đúng tiêu chí, kèm 1-2 lưu ý để tránh hàng giả/hàng kém chất lượng.
-5. Cuối bài, ghi mục "⚠️ Dữ liệu chưa xác minh" liệt kê những thông tin bạn không tìm thấy.
+Hãy thực hiện các bước sau (sử dụng Google Search tìm kiếm tập trung cú pháp `site:shopee.vn`):
+
+### 1. NHẬN DIỆN SẢN PHẨM
+- Tên chính xác, Thương hiệu (Brand), Model/Mã sản phẩm, Phân khúc giá trung bình trên thị trường.
+
+### 2. MA TRẬN SO SÁNH CÁC SELLER TRÊN SHOPEE (Tìm từ 2-4 Seller đại diện)
+Hãy lập bảng Markdown so sánh chi tiết:
+| Tên Shop / Link Shopee | Phân loại Shop (Mall / Yêu Thích / Shop thường) | Mức giá niêm yết & Giá ưu đãi | Trạng thái Flash Sale / Freeship Xtra | Đánh giá (Sao / Lượt bán) |
+|---|---|---|---|---|
+
+*Lưu ý:* Hãy sắp xếp thứ tự bảng theo đúng tiêu chí người dùng chọn: "{sort_criteria}".
+
+### 3. TỔNG HỢP REVIEW & BÌNH LUẬN NGƯỜI MUA THỰC TẾ (User Sentiment)
+Dựa vào đánh giá của người mua từ các link tìm thấy trên Shopee:
+- 👍 **Điểm khen nhiều nhất:** (Chất lượng, tính năng, tốc độ giao hàng...)
+- ⚠️ **Điểm phàn nàn / Rủi ro cần chú ý:** (Ví dụ: hộp móp méo, pin tụt nhanh, khó kết nối, shop phản hồi chậm...)
+
+### 4. ĐỀ XUẤT MUA TỐI ƯU (Shopee Smart Verdict)
+- **Shop đề xuất nên chốt đơn:** Chỉ định rõ nên mua ở shop nào trong bảng trên và lý do phù hợp nhất với tiêu chí "{sort_criteria}".
+- **Tips săn sale Shopee:** Gợi ý cách áp dụng voucher Freeship Xtra hoặc khung giờ Flash Sale để có giá tốt nhất.
 """.strip()
 
 
-NO_SEARCH_INSTRUCTION = """
-Bạn là Trợ lý Mua sắm Cá nhân (AI Shopping Copilot) của Shopee. Trả lời bằng tiếng Việt, định dạng Markdown.
-Hiện KHÔNG có công cụ tra cứu web. Vì vậy:
-- Chỉ nhận diện sản phẩm và đưa lời khuyên chọn nơi mua mang tính nguyên tắc chung (ưu tiên Shopee Mall, kiểm tra shop, cách nhận biết hàng giả...).
-- KHÔNG đưa ra giá cụ thể, số sao, lượt bán hay review của shop nào. Nếu cần nói về giá, chỉ nói khoảng ước lượng và ghi rõ "ước tính, chưa xác minh".
-""".strip()
-
-
-def call_gemini(client, model_name, contents, use_search=True):
-    """Gọi 1 model, có hoặc không bật Google Search grounding."""
+def call_gemini(client, model_name, contents):
     config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_INSTRUCTION if use_search else NO_SEARCH_INSTRUCTION,
-        tools=[types.Tool(google_search=types.GoogleSearch())] if use_search else None,
-        temperature=0.3,  # thấp để giảm bịa
+        system_instruction=SYSTEM_INSTRUCTION,
+        tools=[types.Tool(google_search=types.GoogleSearch())],
+        temperature=0.2,  # Giảm nhiệt độ để đảm bảo tính chính xác của dữ liệu
     )
     return client.models.generate_content(model=model_name, contents=contents, config=config)
 
 
-def extract_sources(response):
-    """Lấy danh sách nguồn web mà Gemini đã dùng (grounding metadata)."""
-    sources, seen = [], set()
-    try:
-        meta = response.candidates[0].grounding_metadata
-        for chunk in (meta.grounding_chunks or []):
-            if chunk.web and chunk.web.uri and chunk.web.uri not in seen:
-                seen.add(chunk.web.uri)
-                sources.append((chunk.web.title or chunk.web.uri, chunk.web.uri))
-        queries = list(meta.web_search_queries or [])
-    except Exception:
-        queries = []
-    return sources, queries
-
-
-# ───────────────────────── 3. Sidebar ─────────────────────────
+# ───────────────────────── 4. Sidebar ─────────────────────────
 with st.sidebar:
-    st.header("⚙️ Tiêu chí ưu tiên")
+    st.header("⚙️ Tiêu chí & Cấu hình")
 
     if not api_key:
         api_key = st.text_input("Nhập Google Gemini API Key:", type="password")
         if not api_key:
-            st.warning("Vui lòng nhập API Key để bắt đầu sử dụng.")
+            st.warning("Vui lòng cấp API key để tiếp tục.")
             st.stop()
 
-    sort_criteria = st.radio(
-        "Bạn muốn ưu tiên xếp hạng theo:",
+    sort_criteria = st.selectbox(
+        "🎯 Tiêu chí ưu tiên chọn shop:",
         [
-            "🌟 Đánh giá cao & Uy tín nhất (Rating & Legitimacy)",
-            "💰 Giá rẻ & Hời nhất (Lowest Price)",
-            "🔥 Lượt mua nhiều & Bán chạy nhất (Best Selling)",
+            "🌟 Uy tín hàng đầu (Ưu tiên Shopee Mall & Đánh giá 4.9*+)",
+            "💰 Giá rẻ nhất (Tối ưu ngân sách, kèm Freeship Xtra)",
+            "🔥 Bán chạy nhất & Đánh giá tích cực (Highest Sales Volume)",
+            "⚡ Đang có Flash Sale / Ưu đãi sâu nhất",
         ],
-    )
-
-    use_search = st.toggle(
-        "🔎 Dùng Google Search (dữ liệu thật)",
-        value=True,
-        help="Nếu bị lỗi 429 (hết quota), app tự chuyển sang chế độ không tra cứu web.",
     )
 
     try:
         available_models = get_available_models(api_key)
     except Exception as e:
         available_models = []
-        st.error(f"Không lấy được danh sách model: {str(e)[:150]}")
+        st.error(f"Lỗi nạp model: {str(e)[:100]}")
 
-    AUTO = "Tự động (model mới nhất)"
-    model_choice = st.selectbox(
-        "🤖 Model Gemini:",
-        [AUTO] + available_models,
-        help="Chỉ hiện các model mà API key của bạn gọi được. Thử model khác nếu bị 429.",
-    )
+    AUTO = "Tự động (Model tối ưu nhất)"
+    model_choice = st.selectbox("🤖 Model AI:", [AUTO] + available_models)
 
     st.divider()
     st.markdown("""
-    **Về dự án:**  
-    Mô hình Proof of Concept (PoC) cho **Sea GMAP 2027 (Shopee & Monee)**.  
-    *Tech stack: Python, Streamlit, Google Gemini Vision + Google Search grounding.*
-
-    **Lưu ý dữ liệu:** thông tin lấy từ kết quả Google Search công khai, không phải API chính thức của Shopee. Giá và đánh giá chỉ mang tính tham khảo.
+    **Shopee Innovation Lab - GMAP 2027**  
+    *Mô phỏng tính năng: Contextual Multi-seller Search & Review Grounding Engine.*
     """)
 
 
-# ───────────────────────── 4. Giao diện nhập liệu ─────────────────────────
+# ───────────────────────── 5. UI Nhập liệu ─────────────────────────
 col1, col2 = st.columns([1, 1])
 image = None
 
 with col1:
-    st.subheader("1. Tải ảnh sản phẩm (Image)")
-    uploaded_image = st.file_uploader("Kéo thả ảnh cần tìm vào đây (JPG, PNG)...", type=["jpg", "jpeg", "png"])
+    st.subheader("📷 1. Ảnh sản phẩm (Shopee Lens)")
+    uploaded_image = st.file_uploader("Tải ảnh sản phẩm cần đối soát giá...", type=["jpg", "jpeg", "png"])
     if uploaded_image:
         image = Image.open(uploaded_image)
-        st.image(image, caption="Ảnh sản phẩm bạn đã chọn", use_container_width=True)
+        st.image(image, caption="Ảnh nhận diện", use_container_width=True)
 
 with col2:
-    st.subheader("2. Dán link hoặc Tên sản phẩm (Optional)")
-    product_input = st.text_area(
-        "Dán link Shopee hoặc gõ mô tả sản phẩm:",
-        placeholder="Ví dụ: Link shopee.vn/... hoặc 'Tai nghe Baseus Bowie M2+ chống ồn màu đen'",
+    st.subheader("🔗 2. Tên hoặc Link Shopee")
+    raw_input = st.text_area(
+        "Nhập tên sản phẩm hoặc dán thẳng link Shopee:",
+        placeholder="Ví dụ:\n- https://shopee.vn/Tai-nghe-Bluetooth-Baseus-Bowie-M2-i.123456.789\n- Robot hút bụi Xiaomi Dreame D9 Max",
         height=140,
     )
 
 st.divider()
 
-
-# ───────────────────────── 5. Xử lý khi bấm nút ─────────────────────────
-if st.button("🚀 Quét thị trường & Xếp hạng nơi mua", use_container_width=True):
-    if not uploaded_image and not product_input.strip():
-        st.error("👉 Vui lòng cung cấp ít nhất một ảnh hoặc dán link/tên sản phẩm để AI phân tích!")
+# ───────────────────────── 6. Xử lý logic ─────────────────────────
+if st.button("🔎 Quét Seller Shopee & Phân tích Đánh giá", use_container_width=True):
+    if not uploaded_image and not raw_input.strip():
+        st.error("👉 Vui lòng tải ít nhất một ảnh hoặc nhập tên/link Shopee!")
     else:
-        with st.spinner("🤖 AI đang nhận diện sản phẩm và tra cứu giá, đánh giá trên web..."):
+        with st.spinner("🚀 AI đang quét các seller Shopee, đối chiếu Flash Sale & bóc tách đánh giá..."):
             try:
                 client = genai.Client(api_key=api_key)
+
+                # 1. Tiền xử lý link nếu có
+                parsed_text = extract_product_name_from_url(raw_input)
 
                 contents = []
                 if image is not None:
                     contents.append(image)
-                if product_input.strip():
-                    contents.append(f"Thông tin bổ sung/link: {product_input.strip()}")
-                contents.append(build_prompt(sort_criteria))
+                if parsed_text:
+                    contents.append(f"Thông tin sản phẩm/từ khóa truy vấn: {parsed_text}")
+                
+                # Nạp prompt phân tích đa chiều
+                contents.append(build_copilot_prompt(parsed_text, sort_criteria))
 
-                if model_choice != AUTO:
-                    models_to_try = [model_choice]
-                else:
-                    models_to_try = available_models[:3]
+                # 2. Quyết định model
+                models_to_try = [model_choice] if model_choice != AUTO else available_models[:3]
                 if not models_to_try:
-                    raise RuntimeError("Key này không gọi được model flash nào. Kiểm tra lại API key.")
+                    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash"]
 
-                # Thử lần lượt: các model có grounding -> cuối cùng 1 lần không grounding
-                attempts = [(m, use_search) for m in models_to_try]
-                if use_search:
-                    attempts.append((models_to_try[0], False))
+                response = None
+                used_model = None
 
-                response, used_model, grounded, errors = None, None, False, []
-                for m_name, with_search in attempts:
+                for m in models_to_try:
                     try:
-                        r = call_gemini(client, m_name, contents, use_search=with_search)
-                        if r and r.text:
-                            response, used_model, grounded = r, m_name, with_search
+                        res = call_gemini(client, m, contents)
+                        if res and res.text:
+                            response = res
+                            used_model = m
                             break
-                        errors.append(f"{m_name} (search={with_search}): phản hồi rỗng")
-                    except Exception as e:
-                        short = str(e)[:200]
-                        errors.append(f"{m_name} (search={with_search}): {short}")
+                    except Exception:
+                        continue
 
-                if response is None:
-                    raise RuntimeError("\n\n".join(errors))
+                if not response:
+                    raise RuntimeError("Không thể kết nối hoặc đã vượt quá hạn mức quota API.")
 
-                if use_search and not grounded:
-                    st.warning("⚠️ Google Search đang hết quota hoặc không khả dụng với key này, nên kết quả dưới đây **KHÔNG có dữ liệu giá/đánh giá thật**, chỉ là nhận diện sản phẩm và lời khuyên chung.")
-                else:
-                    st.success(f"✅ Phân tích hoàn tất! (model: {used_model})")
+                # 3. Hiển thị kết quả
+                st.success(f"✅ Hoàn tất đối soát thị trường qua model: **{used_model}**")
                 st.markdown(response.text)
 
-                sources, queries = extract_sources(response) if grounded else ([], [])
-                st.divider()
-                if not grounded:
+                # 4. Hiển thị nguồn trích dẫn thật từ Shopee
+                try:
+                    meta = response.candidates[0].grounding_metadata
+                    sources = []
+                    for chunk in (meta.grounding_chunks or []):
+                        if chunk.web and chunk.web.uri:
+                            sources.append((chunk.web.title or chunk.web.uri, chunk.web.uri))
+                    
+                    if sources:
+                        st.divider()
+                        st.subheader("📍 Các link Shopee & trang nguồn AI đã thu thập:")
+                        for title, uri in sources:
+                            st.markdown(f"- [{title}]({uri})")
+                except Exception:
                     pass
-                elif sources:
-                    st.subheader("🔎 Nguồn dữ liệu đã tra cứu")
-                    for title, uri in sources:
-                        st.markdown(f"- [{title}]({uri})")
-                    if queries:
-                        st.caption("Từ khóa Google đã tìm: " + " | ".join(queries))
-                else:
-                    st.warning("⚠️ Gemini không dùng được nguồn web nào cho lần này, nên số liệu giá/đánh giá có thể không đáng tin. Hãy thử lại hoặc nhập tên sản phẩm cụ thể hơn.")
 
             except Exception as e:
                 st.error(f"Đã xảy ra lỗi: {e}")
-                st.info("Gợi ý: kiểm tra API key, hạn mức (quota) hoặc kết nối mạng.")
