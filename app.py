@@ -30,7 +30,7 @@ st.markdown('<div class="sub-title">Tải ảnh hoặc dán link sản phẩm đ
 with st.sidebar:
     st.header("⚙️ Tiêu chí ưu tiên")
     
-    # Kiểm tra API Key (Nếu trong .env chưa có thì cho nhập tay)
+    # Kiểm tra API Key (Nếu trong file .env chưa có thì cho nhập tay)
     if not api_key:
         api_key = st.text_input("Nhập Google Gemini API Key:", type="password")
         if not api_key:
@@ -50,7 +50,7 @@ with st.sidebar:
     st.markdown("""
     **Về dự án:**  
     Mô hình Proof of Concept (PoC) xây dựng cho **Sea GMAP 2027 (Shopee & Monee)**.  
-    *Tech stack: Python, Streamlit, Gemini 1.5 Flash Vision & Search.*
+    *Tech stack: Python, Streamlit, Google Gemini Vision & E-commerce Intelligence.*
     """)
 
 # 3. Giao diện nhập liệu: Ảnh hoặc Link/Tên sản phẩm
@@ -78,15 +78,9 @@ if st.button("🚀 Quét thị trường & Xếp hạng nơi mua", use_container
     if not uploaded_image and not product_input.strip():
         st.error("👉 Vui lòng cung cấp ít nhất một ảnh hoặc dán link/tên sản phẩm để AI phân tích!")
     else:
-        with st.spinner("🤖 AI đang nhận diện sản phẩm, quét các sàn và phân tích hàng trăm bình luận thực tế..."):
+        with st.spinner("🤖 AI đang nhận diện sản phẩm, phân tích thị trường và quét các đánh giá thực tế..."):
             try:
                 genai.configure(api_key=api_key)
-                
-                # Cấu hình model Gemini 1.5 Flash hỗ trợ Multimodal và Web Search
-                model = genai.GenerativeModel(
-                    model_name="gemini-1.5-flash",
-                    tools="google_search_retrieval"
-                )
                 
                 # Xây dựng System Prompt chi tiết chuẩn phong cách E-commerce Specialist
                 prompt = f"""
@@ -97,36 +91,50 @@ if st.button("🚀 Quét thị trường & Xếp hạng nơi mua", use_container
                 - Tiêu chí ưu tiên xếp hạng hiện tại: "{sort_criteria}"
                 
                 NHIỆM VỤ CỦA BẠN:
-                1. NHẬN DIỆN SẢN PHẨM: Xác định chính xác tên sản phẩm, thương hiệu, model và ngành hàng.
-                2. QUÉT THỊ TRƯỜNG & NƠI BÁN (Shopee, các sàn TMĐT):
-                   - Tìm và liệt kê từ 2 đến 3 nơi bán/shop tiêu biểu (ví dụ: Shop Mall chính hãng, Shop bán rẻ nhất, Shop có lượt bán cao nhất).
-                   - Cung cấp: Tên shop/loại shop, Mức giá ước tính, Lượt bán tham khảo, Số sao đánh giá.
-                   - Sắp xếp thứ tự danh sách này dựa đúng theo tiêu chí ưu tiên: "{sort_criteria}".
-                3. TỔNG HỢP REVIEW THỰC TẾ:
-                   - Bóc tách từ đánh giá của người mua: Điểm KHEN nhiều nhất (Chất liệu, tốc độ giao hàng, đóng gói...)
-                   - Điểm CHÊ / Cảnh báo rủi ro (Hàng dễ vỡ, form áo chật, shop giao chậm, lỗi vặt...).
+                1. NHẬN DIỆN SẢN PHẨM: Xác định chính xác tên sản phẩm, thương hiệu, model và phân khúc ngành hàng.
+                2. SO SÁNH CÁC LỰA CHỌN NƠI BÁN (Shopee & Thị trường TMĐT):
+                   - Phân tích từ 2 đến 3 phân nhóm nơi bán tiêu biểu: Shop Mall chính hãng, Shop bán giá rẻ nhất, Shop có lượt mua khủng nhất.
+                   - Liệt kê: Loại shop, Mức giá ước tính trên Shopee, Đánh giá trung bình sao.
+                   - Sắp xếp thứ tự danh sách này dựa đúng theo tiêu chí: "{sort_criteria}".
+                3. TỔNG HỢP REVIEW THỰC TẾ CỦA KHÁCH HÀNG:
+                   - Điểm KHEN nhiều nhất: Độ bền, thiết kế, chất lượng đóng gói, tốc độ giao hàng.
+                   - Điểm CHÊ / RỦI RO cần né: Hàng dễ trầy xước, form chật, lỗi kết nối, shop phục vụ kém.
                 4. QUYẾT ĐỊNH MUA HÀNG (SMART VERDICT):
-                   - Đưa ra lời khuyên dứt khoát: Khách hàng nên bấm MUA Ở ĐÂU để tối ưu nhất theo tiêu chí đã chọn?
+                   - Đưa ra lời khuyên dứt khoát: Người mua nên chọn mua ở đâu để an tâm nhất theo đúng tiêu chí đã chọn?
                 
-                YÊU CẦU ĐỊNH DẠNG TRẢ VỀ:
-                - Trình bày dạng Markdown chuyên nghiệp, có Bảng so sánh (Comparison Table), gạch đầu dòng rõ ràng, icon sinh động.
-                - Khách quan, trung thực, chỉ rõ rủi ro nếu có shop bán hàng quá rẻ khả nghi.
+                YÊU CẦU ĐỊNH DẠNG:
+                - Trình bày dạng Markdown đẹp mắt, có Bảng so sánh (Comparison Table), gạch đầu dòng rõ ràng, icon sinh động.
                 """
                 
-                # Gửi dữ liệu đa phương thức (ảnh + text) cho Gemini
+                # Gom dữ liệu đầu vào
                 content_inputs = []
                 if uploaded_image:
                     content_inputs.append(image)
                 if product_input.strip():
-                    content_inputs.append(f"Thông tin mô tả/link sản phẩm bổ sung: {product_input}")
+                    content_inputs.append(f"Thông tin bổ sung/link: {product_input}")
                 content_inputs.append(prompt)
                 
-                response = model.generate_content(content_inputs)
+                # Tự động thử lần lượt các model của Google để tránh lỗi 404
+                models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+                response = None
+                last_err = None
                 
-                # Hiển thị kết quả ra màn hình
-                st.success("✅ Phân tích hoàn tất! Dưới đây là bảng xếp hạng và đánh giá chi tiết:")
-                st.markdown(response.text)
+                for m_name in models_to_try:
+                    try:
+                        model = genai.GenerativeModel(model_name=m_name)
+                        response = model.generate_content(content_inputs)
+                        if response:
+                            break
+                    except Exception as e:
+                        last_err = e
+                        continue
+                
+                if response:
+                    st.success("✅ Phân tích hoàn tất! Dưới đây là bảng xếp hạng và đánh giá chi tiết:")
+                    st.markdown(response.text)
+                else:
+                    raise last_err
                 
             except Exception as e:
-                st.error(f"Đã xảy ra lỗi trong quá trình gọi AI: {str(e)}")
-                st.info("Gợi ý: Kiểm tra lại API key hoặc kết nối mạng của bạn.")
+                st.error(f"Đã xảy ra lỗi: {str(e)}")
+                st.info("Gợi ý: Kiểm tra lại API key trong file .env hoặc kết nối mạng.")
