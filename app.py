@@ -75,17 +75,22 @@ NHIỆM VỤ:
 """.strip()
 
 
-def call_gemini(client, model_name, contents):
-    """Gọi 1 model với Google Search grounding bật."""
-    return client.models.generate_content(
-        model=model_name,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-            temperature=0.3,  # thấp để giảm bịa
-        ),
+NO_SEARCH_INSTRUCTION = """
+Bạn là Trợ lý Mua sắm Cá nhân (AI Shopping Copilot) của Shopee. Trả lời bằng tiếng Việt, định dạng Markdown.
+Hiện KHÔNG có công cụ tra cứu web. Vì vậy:
+- Chỉ nhận diện sản phẩm và đưa lời khuyên chọn nơi mua mang tính nguyên tắc chung (ưu tiên Shopee Mall, kiểm tra shop, cách nhận biết hàng giả...).
+- KHÔNG đưa ra giá cụ thể, số sao, lượt bán hay review của shop nào. Nếu cần nói về giá, chỉ nói khoảng ước lượng và ghi rõ "ước tính, chưa xác minh".
+""".strip()
+
+
+def call_gemini(client, model_name, contents, use_search=True):
+    """Gọi 1 model, có hoặc không bật Google Search grounding."""
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM_INSTRUCTION if use_search else NO_SEARCH_INSTRUCTION,
+        tools=[types.Tool(google_search=types.GoogleSearch())] if use_search else None,
+        temperature=0.3,  # thấp để giảm bịa
     )
+    return client.models.generate_content(model=model_name, contents=contents, config=config)
 
 
 def extract_sources(response):
@@ -120,6 +125,25 @@ with st.sidebar:
             "💰 Giá rẻ & Hời nhất (Lowest Price)",
             "🔥 Lượt mua nhiều & Bán chạy nhất (Best Selling)",
         ],
+    )
+
+    use_search = st.toggle(
+        "🔎 Dùng Google Search (dữ liệu thật)",
+        value=True,
+        help="Nếu bị lỗi 429 (hết quota), app tự chuyển sang chế độ không tra cứu web.",
+    )
+
+    try:
+        available_models = get_available_models(api_key)
+    except Exception as e:
+        available_models = []
+        st.error(f"Không lấy được danh sách model: {str(e)[:150]}")
+
+    AUTO = "Tự động (model mới nhất)"
+    model_choice = st.selectbox(
+        "🤖 Model Gemini:",
+        [AUTO] + available_models,
+        help="Chỉ hiện các model mà API key của bạn gọi được. Thử model khác nếu bị 429.",
     )
 
     st.divider()
@@ -170,30 +194,44 @@ if st.button("🚀 Quét thị trường & Xếp hạng nơi mua", use_container
                     contents.append(f"Thông tin bổ sung/link: {product_input.strip()}")
                 contents.append(build_prompt(sort_criteria))
 
-                models_to_try = get_available_models(api_key)[:3]
+                if model_choice != AUTO:
+                    models_to_try = [model_choice]
+                else:
+                    models_to_try = available_models[:3]
                 if not models_to_try:
                     raise RuntimeError("Key này không gọi được model flash nào. Kiểm tra lại API key.")
 
-                response, used_model, errors = None, None, []
-                for m_name in models_to_try:
+                # Thử lần lượt: các model có grounding -> cuối cùng 1 lần không grounding
+                attempts = [(m, use_search) for m in models_to_try]
+                if use_search:
+                    attempts.append((models_to_try[0], False))
+
+                response, used_model, grounded, errors = None, None, False, []
+                for m_name, with_search in attempts:
                     try:
-                        r = call_gemini(client, m_name, contents)
+                        r = call_gemini(client, m_name, contents, use_search=with_search)
                         if r and r.text:
-                            response, used_model = r, m_name
+                            response, used_model, grounded = r, m_name, with_search
                             break
-                        errors.append(f"{m_name}: phản hồi rỗng")
+                        errors.append(f"{m_name} (search={with_search}): phản hồi rỗng")
                     except Exception as e:
-                        errors.append(f"{m_name}: {e}")
+                        short = str(e)[:200]
+                        errors.append(f"{m_name} (search={with_search}): {short}")
 
                 if response is None:
                     raise RuntimeError("\n\n".join(errors))
 
-                st.success(f"✅ Phân tích hoàn tất! (model: {used_model})")
+                if use_search and not grounded:
+                    st.warning("⚠️ Google Search đang hết quota hoặc không khả dụng với key này, nên kết quả dưới đây **KHÔNG có dữ liệu giá/đánh giá thật**, chỉ là nhận diện sản phẩm và lời khuyên chung.")
+                else:
+                    st.success(f"✅ Phân tích hoàn tất! (model: {used_model})")
                 st.markdown(response.text)
 
-                sources, queries = extract_sources(response)
+                sources, queries = extract_sources(response) if grounded else ([], [])
                 st.divider()
-                if sources:
+                if not grounded:
+                    pass
+                elif sources:
                     st.subheader("🔎 Nguồn dữ liệu đã tra cứu")
                     for title, uri in sources:
                         st.markdown(f"- [{title}]({uri})")
