@@ -1,6 +1,6 @@
 streamlit
 pandas
-Pillow
-python-dotenv
+pillow
 google-genai
 apify-client
+python-dotenv
