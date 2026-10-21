@@ -7,8 +7,9 @@ Proof of concept built for **Sea GMAP 2027 (Shopee & Monee track)**.
 
 > Independent student project. Demo for SEA GMAP 2027
 
-![demo screenshot](docs/demo.png)
-<!-- Add a screenshot or a 60-second GIF at docs/demo.png. This is the first thing a reviewer looks at. -->
+![demo screenshot]
+<<img width="923" height="436" alt="image" src="https://github.com/user-attachments/assets/6a384a9a-ab8c-4ccc-a00f-90c1977a05b5" />
+ -->
 
 ---
 
