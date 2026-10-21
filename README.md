@@ -1,109 +1,140 @@
-# 🛍️ Shopee VN Copilot: Multimodal Decision & Price Optimization Engine
-> **Proof of Concept (PoC) | Strategic Product Initiative for Sea GMAP 2027 (Shopee & Monee Track)**
-> 🔗 **Live Demo Web App:** [https://your-app-name.streamlit.app](https://shopee-smart-copilot-minhnguyet.streamlit.app/)
+# 🛍️ Shopee Copilot
 
-> *Transforming external discovery hype into frictionless, high-conversion transactions.*
+**From a product photo to a trustworthy Shopee deal, in one screen.**
 
----
+Proof of concept built for **Sea GMAP 2027 (Shopee & Monee track)**.
+🔗 **Live demo:** https://shopee-smart-copilot-minhnguyet.streamlit.app/
 
-## 1. Executive Summary & Market Context
-The Southeast Asian e-commerce landscape is witnessing a fierce rivalry between traditional search-based marketplaces and entertainment-driven social commerce. 
+> Independent student project. Demo for SEA GMAP 2027
 
-While **TikTok Shop** has rapidly expanded through algorithmic content discovery and impulse buying, empirical market studies ( *Koswara, 2025*) reveal a critical structural behavior:
-* **The 52% "Showrooming" Phenomenon:** **52% of Gen Z consumers** discover viral lifestyle and fashion items on short-form video platforms (TikTok/Instagram), but cross-check prices on **Shopee** before executing the actual purchase.
-* **The Operational Divide:** Despite TikTok's top-of-funnel attention dominance, it suffers from a **2.6x higher return rate** and **77% slower delivery turnaround** compared to Shopee’s proprietary logistics network (**Shopee Xpress - SPX**).
-
-However, Shopee faces a massive **drop-off rate at the bottom of the funnel**: consumers arriving from TikTok often abandon their carts due to extreme search friction and choice overload. 
-
-**Shopee Lens AI** was engineered to eliminate this friction—converting external browsing intent into immediate, confident checkouts.
-Source: Koswara, A. (2025). E-commerce rivalry in Southeast Asia: A Google Trends analysis of TikTok Shop, Shopee, and Lazada. Mingzhi International Journal of Business, 1(1), 23–34. https://doi.org/10.55927/mijb.v1i1.2
----
-
-## 2. Problem Statement: The Three Friction Points on Shopee
-
-### ❌ Friction 1: The "Search Matrix" & Decision Fatigue
-When users transition from a TikTok video to Shopee, text-based search queries yield hundreds of identical stock photos with wide price discrepancies. Consumers spend **15–20 minutes** opening multiple tabs, manually comparing listings, verifying shop legitimacy, and calculating final costs. This cognitive overload leads to high bounce and cart-abandonment rates.
-
-### ❌ Friction 2: Review Pollution & Sentiment Opacity
-Shopee’s rating ecosystem is saturated with "incentivized" and low-intent feedback (e.g., *"Rating 5 stars for Shopee Coins"*, *"Fast delivery, haven't tested the item"*). Authentic sentiment regarding sizing discrepancies, fragile materials, or counterfeit risks is buried under thousands of superficial 5-star comments. Buyers lack actionable clarity on product defects.
-
-### ❌ Friction 3: The "Voucher Matrix" Calculation Gap
-Shopee's competitive edge lies in its deep subsidy infrastructure (Freeship Xtra, Live/Video Vouchers, Mall Vouchers, Payment discounts via Monee/SPayLater). However, calculating the actual **Net Landing Price** requires complex stacking logic that search listing APIs do not disclose. Price-sensitive shoppers often cannot determine which seller truly offers the lowest final price.
+![demo screenshot](docs/demo.png)
+<!-- Add a screenshot or a 60-second GIF at docs/demo.png. This is the first thing a reviewer looks at. -->
 
 ---
 
-## 3. Product Rationale: Why Shopee Lens AI Was Born
+## What it does
 
-Instead of attempting to out-entertain TikTok with unsustainable content marketing budgets, Shopee’s winning playbook lies in **Asymmetric Warfare**:
+You upload a photo of a product you saw on TikTok or Instagram (or paste a Shopee link, or type a name). The app:
 
-> **"Let TikTok spend millions subsidizing creators to generate initial demand; Shopee will be the ultimate, frictionless Decision & Fulfillment Engine that captures the final transaction."**
+1. **Identifies the product** with Gemini Vision and returns structured JSON: name, brand and an optimised Shopee search keyword.
+2. **Scans shopee.vn** through an Apify actor and collects up to 20 listings from different sellers.
+3. **Cleans and flags the results**: drops off-topic listings such as cases and accessories, and flags suspiciously cheap listings.
+4. **Ranks the sellers** by the priority you choose (see below).
+5. **Reads buyer reviews** of the recommended listing and has Gemini write a short report: deal analysis, what buyers praise and complain about, and whether to buy now or wait for a sale.
 
-**Shopee Lens AI** operates as a smart, multimodal shopping copilot:
-1. **Zero-Text Visual Retrieval:** Users upload a screenshot or photo from TikTok/Instagram. The **Gemini Multimodal Vision Engine** instantly recognizes the exact SKU, category, and specifications.
-2. **Dynamic Heuristic Promotion Engine:** Automatically applies tiered platform voucher rules (Live/Video -15%, Mall -8%, Freeship Xtra) to calculate the true **Post-Voucher Net Price** across multiple sellers.
-3. **Automated Sentiment Synthesis:** Ingests and parses real buyer comments using Natural Language Processing (NLP) to generate transparent **Pros, Cons, and Risk Alerts** (`⚠️ Abnormally low price / Counterfeit risk`).
-4. **Actionable Buying Verdict:** Eliminates decision paralysis by delivering a clear, ranked recommendation tailored to user priorities (Best Reputation, Lowest Net Price, or Top Sales Volume).
+The interface is in Vietnamese, because the target market is Shopee Vietnam.
 
----
+### Ranking modes
 
-## 4. Enterprise Roadmap & Strategic Value (Sea / Shopee)
-
-This Proof of Concept is architected to transition into Shopee's internal infrastructure:
-
-### 1. Architecture Migration (Scraper to Internal RPC)
-- Replace third-party scrapers with direct gRPC connections to Shopee's internal `SearchService` and `ReviewService`.
-- Reduce data retrieval latency from ~15 seconds to under 200 milliseconds.
-
-### 2. Personalized Margin & Voucher Stacking
-- Integrate with ShopeePay and SPayLater engines to compute real-time, user-specific net prices, taking into account user voucher wallets and shipping subsidies.
-
-### 3. Core Business Metrics Impact
-- **Conversion Rate (CVR):** Reduces decision paralysis by curating trustworthy listings for complex, high-consideration purchases.
-- **Return & Refund Rate (RRR):** Mitigates buyer remorse and product mismatches through transparent review sentiment analysis.
+| Mode | How it works |
+|---|---|
+| 🌟 Most trusted | Score = rating + 0.3 × min(log10(rating count + 1), 3) + 0.3 × (shop rating / 5) + 0.5 if the shop name suggests an official store − 2 if flagged |
+| 💰 Lowest price | Sorted by list price, flagged listings pushed to the bottom |
+| 🔥 Best selling | Keeps Shopee's own "sales" ordering. This is a ranking, **not** actual unit sales |
+| ⚡ Flash Sale | Listings with a Flash Sale label first, then by price |
 
 ---
 
-## 5. Technical Architecture Summary
-* **Frontend Interface:** Streamlit (Responsive web interface optimized for rapid prototyping)
-* **Vision & NLP Backbone:** Google Gemini API (Multimodal entity recognition & zero-shot sentiment parsing)
-* **Data Ingestion:** Apify Shopee Scraper actor integration paired with local fallback heuristics
-* **Promotion Rule Engine:** Custom-built Python logic simulating real-time Shopee voucher stacking and discount caps
+## How it uses AI, and where it deliberately does not trust it
 
-## 6. Installation & Local Setup
+Most of the engineering effort went into stopping the model from making things up.
 
-### Prerequisites
-- Python 3.10 or higher
-- Git
+- **Structured output for product recognition.** JSON response mode at low temperature (0.1), then parsed in code.
+- **The report is grounded in collected data only.** The prompt passes in the real prices, ratings and review text and tells the model to use only those numbers.
+- **Missing data is stated, not filled in.** If no review text could be collected, the prompt forces the report to say so instead of inventing praise or complaints.
+- **Known data gaps are in the prompt.** The model is told that voucher, unit-sales and official-badge data are not available.
+- **Simulated data is labelled.** A demo-only fallback exists for when the scraper fails. It is marked on screen, and the model is told not to give a purchase recommendation on it.
+- **The low-price flag is a heuristic, not a verdict.** A listing is flagged when its price is below 35% of the median and it has fewer than 50 ratings. It is a warning, not proof of a counterfeit.
+- **Failures are not cached**, so a temporary scraper error does not stick for 5 or 10 minutes.
 
-### Step 1: Clone the Repository
+---
+
+## What is real and what is not
+
+| Capability | Status |
+|---|---|
+| Photo / link / name → search keyword | ✅ Working (Gemini) |
+| Multi-seller price comparison | ✅ Working, list prices, depends on a third-party Apify actor |
+| Buyer-review summary | ⚠️ Works when Shopee does not block the review endpoint. Otherwise the app falls back to rating statistics only and says so |
+| **Voucher stacking / net landing price** | ❌ **Not implemented.** Prices are list prices before vouchers and shipping |
+| Per-shop unit sales | ❌ Not available to logged-out visitors |
+| Mall / Preferred badge | ⚠️ Guessed from the shop name and labelled as a guess |
+
+Full detail in [LIMITATION.md](LIMITATION.md).
+
+<!--
+## Evaluation  (uncomment after you run it and fill in real numbers)
+
+Tested on N product photos (phones, headphones, skincare, ...), photographed or screenshotted from TikTok.
+
+| Metric | Result |
+|---|---|
+| Correct product and brand identified | X / N |
+| Search keyword returned relevant listings | X / N |
+| Report contained a claim not supported by the data | X / N |
+| Median time from upload to report | X seconds |
+
+Failure cases I saw, and what I changed in response: ...
+-->
+
+---
+
+## Why this problem
+
+Content platforms are now where many Vietnamese shoppers first see a product. Industry data show how close the race has become: TikTok Shop is the second-largest e-commerce platform in Southeast Asia by GMV, and in 2025 its regional GMV (including Tokopedia) reached roughly two-thirds of Shopee's, according to Momentum Works. In Vietnam, Shopee and TikTok Shop together made up about 97% of GMV on the four biggest platforms in 2025, according to Metric.
+
+My working hypothesis is that shoppers who arrive on Shopee after seeing a product elsewhere face three frictions:
+
+1. **Search friction:** a text search returns many near-identical listings at very different prices.
+2. **Trust friction:** it is hard to tell genuine reviews and reliable sellers from noise.
+3. **Price friction:** the final price after vouchers is hard to compare across sellers.
+
+This PoC addresses the first two. The third is on the roadmap below. These frictions are hypotheses from my own observation, not measured results. Validating them is the first step in the roadmap.
+
+Sources: [Momentum Works via DealStreetAsia](https://www.dealstreetasia.com/stories/momentum-works-report-2025-479044) · [Metric via KrASIA](https://kr-asia.com/tiktok-shop-narrows-the-gap-with-shopee-in-southeast-asias-e-commerce-market)
+
+---
+
+## If this were built inside Shopee
+
+| Step | Idea |
+|---|---|
+| Replace scraping | Use internal search and review services instead of third-party scrapers. This should cut latency sharply and remove the review-blocking problem (expected, not measured) |
+| Real net price | Compute price after vouchers, Freeship and payment offers using real voucher rules and the user's own voucher wallet. The PoC does not attempt this because the data is not public |
+| Better matching | Replace the keyword filter with product-model matching to separate near-identical variants |
+| Measure it | A/B test with **conversion rate** as the primary metric and **return/refund rate** and **time to purchase** as secondary metrics. Guardrail: share of sessions where the AI report was wrong or unsupported |
+
+---
+
+## Tech stack
+
+Python · Streamlit · Google Gemini API (vision and text) · Apify actors for Shopee search and reviews · pandas · Pillow
+
+## Run it locally
+
+Requires Python 3.10+.
+
 ```bash
 git clone https://github.com/EmiliaLunetta/shopee-smart-copilot.git
 cd shopee-smart-copilot
-```
-
-## Step 2:  Install Dependencies
-```bash
 pip install -r requirements.txt
-```
-
-## Step 3: Configure Environment Variables
-Copy the sample environment file to create .env:
-```bash
-cp .env.example .env
-```
-Populate .env with your API credentials:
-```bash
-# Required for vision extraction and sentiment analysis
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# Required for live Shopee scraping (Optional: fallback to mock data if omitted)
-APIFY_TOKEN=your_apify_token_here
-```
-
-## Step 4: Run the Application
-
-```bash
+cp .env.example .env      # then add your keys
 streamlit run app.py
 ```
-Open your browser at http://localhost:8501.
-## 
+
+Open http://localhost:8501. You can also paste the keys into the sidebar instead of using `.env`.
+
+| Variable | Needed | Purpose |
+|---|---|---|
+| `GEMINI_API_KEY` | Yes | Product recognition and the report |
+| `APIFY_TOKEN` | For live data | Without it the app can only use labelled simulated data |
+| `GEMINI_MODEL` | No | Override the default Gemini model |
+| `GEMINI_USE_VERTEX` | No | Set to `1` if your key type returns a 401 error on the standard Gemini API |
+| `APIFY_ACTOR_SEARCH`, `APIFY_ACTOR_REVIEWS` | No | Swap in different Apify actors |
+| `APIFY_REVIEWS_PROXY_GROUP` | No | e.g. `RESIDENTIAL`, if your Apify plan includes it |
+
+Each scan uses your own Apify credit and Gemini quota. Never commit your `.env` file.
+
+## Responsible use
+
+The app reads public Shopee pages through a third-party scraper. You are responsible for following the terms of Shopee, Apify and Google. The report is generated by a language model and is for reference only, not purchase advice.
