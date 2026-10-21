@@ -1,4 +1,4 @@
-# 🛍️ Shopee Lens AI: Multimodal Decision & Price Optimization Engine
+# 🛍️ Shopee VN Copilot: Multimodal Decision & Price Optimization Engine
 > **Proof of Concept (PoC) | Strategic Product Initiative for Sea GMAP 2027 (Shopee & Monee Track)**
 > 🔗 **Live Demo Web App:** [https://your-app-name.streamlit.app](https://shopee-smart-copilot-minhnguyet.streamlit.app/)
 
