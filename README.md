@@ -9,14 +9,14 @@
 ## 1. Executive Summary & Market Context
 The Southeast Asian e-commerce landscape is witnessing a fierce rivalry between traditional search-based marketplaces and entertainment-driven social commerce. 
 
-While **TikTok Shop** has rapidly expanded through algorithmic content discovery and impulse buying, empirical market studies (e.g., *Koswara, 2025*) reveal a critical structural behavior:
+While **TikTok Shop** has rapidly expanded through algorithmic content discovery and impulse buying, empirical market studies ( *Koswara, 2025*) reveal a critical structural behavior:
 * **The 52% "Showrooming" Phenomenon:** **52% of Gen Z consumers** discover viral lifestyle and fashion items on short-form video platforms (TikTok/Instagram), but cross-check prices on **Shopee** before executing the actual purchase.
 * **The Operational Divide:** Despite TikTok's top-of-funnel attention dominance, it suffers from a **2.6x higher return rate** and **77% slower delivery turnaround** compared to Shopee’s proprietary logistics network (**Shopee Xpress - SPX**).
 
 However, Shopee faces a massive **drop-off rate at the bottom of the funnel**: consumers arriving from TikTok often abandon their carts due to extreme search friction and choice overload. 
 
 **Shopee Lens AI** was engineered to eliminate this friction—converting external browsing intent into immediate, confident checkouts.
-
+Source: Koswara, A. (2025). E-commerce rivalry in Southeast Asia: A Google Trends analysis of TikTok Shop, Shopee, and Lazada. Mingzhi International Journal of Business, 1(1), 23–34. https://doi.org/10.55927/mijb.v1i1.2
 ---
 
 ## 2. Problem Statement: The Three Friction Points on Shopee
