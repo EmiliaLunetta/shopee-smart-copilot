@@ -84,6 +84,10 @@ Failure cases I saw, and what I changed in response: ...
 
 Content platforms are now where many Vietnamese shoppers first see a product. Industry data show how close the race has become: TikTok Shop is the second-largest e-commerce platform in Southeast Asia by GMV, and in 2025 its regional GMV (including Tokopedia) reached roughly two-thirds of Shopee's, according to Momentum Works. In Vietnam, Shopee and TikTok Shop together made up about 97% of GMV on the four biggest platforms in 2025, according to Metric.
 
+I have been closely following the strategic partnership between Sea Limited and OpenAI (established in June 2026). Integrating Shopee into ChatGPT is an excellent move for the "Discovery" stage of the customer journey.
+However, a significant gap remains once a user finds a product: among the dozens of shops offering it, which one should they choose? Does a particular shop have negative reviews or a history of fraudulent behavior? To address this, I personally developed this "Shopee Smart Copilot" Proof of Concept (PoC) as a solution for the "Decision-Making" phase. It automates cross-seller comparisons, validates Flash Sale and free-shipping offers, and parses authentic customer reviews for individual shops.
+This project demonstrates that my AI solution can be seamlessly integrated into the very AI ecosystem that Sea and Shopee are currently building in collaboration with OpenAI.
+
 My working hypothesis is that shoppers who arrive on Shopee after seeing a product elsewhere face three frictions:
 
 1. **Search friction:** a text search returns many near-identical listings at very different prices.
